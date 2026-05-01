@@ -21,13 +21,13 @@ export async function getSmartDefaults({
     requestedSearchKey || (chatType === "private" ? "global" : "group");
 
   if (searchKey === "group" && chatType !== "private") {
-    const groupScoresExist = await db
-      .selectFrom("leaderboard")
-      .select("userId")
-      .where("userId", "=", userId)
-      .where("chatId", "=", chatId)
-      .limit(1)
-      .executeTakeFirst();
+    const groupScoresExist = await db.collection("leaderboard").findOne(
+      {
+        userId,
+        chatId,
+      },
+      { projection: { _id: 1 } },
+    );
 
     if (!groupScoresExist) {
       searchKey = "global";
@@ -51,18 +51,14 @@ export async function getSmartDefaults({
     });
   }
 
-  let hasAnyScoresQuery = db
-    .selectFrom("leaderboard")
-    .select("userId")
-    .where("userId", "=", userId)
-    .where("wordLength", "=", wordLength.toString() as "4" | "5" | "6")
-    .limit(1);
-
-  if (searchKey === "group") {
-    hasAnyScoresQuery = hasAnyScoresQuery.where("chatId", "=", chatId);
-  }
-
-  const hasAnyScores = !!(await hasAnyScoresQuery.executeTakeFirst());
+  const hasAnyScores = !!(await db.collection("leaderboard").findOne(
+    {
+      userId,
+      wordLength: wordLength.toString(),
+      ...(searchKey === "group" ? { chatId } : {}),
+    },
+    { projection: { _id: 1 } },
+  ));
 
   return { searchKey, timeKey, wordLength, hasAnyScores };
 }
@@ -79,18 +75,14 @@ async function getSmartDefaultWordLength({
   const preferenceOrder: AllowedWordLength[] = [5, 4, 6];
 
   for (const length of preferenceOrder) {
-    let query = db
-      .selectFrom("leaderboard")
-      .select("userId")
-      .where("userId", "=", userId)
-      .where("wordLength", "=", length.toString() as "4" | "5" | "6")
-      .limit(1);
-
-    if (searchKey === "group") {
-      query = query.where("chatId", "=", chatId);
-    }
-
-    const exists = await query.executeTakeFirst();
+    const exists = await db.collection("leaderboard").findOne(
+      {
+        userId,
+        wordLength: length.toString(),
+        ...(searchKey === "group" ? { chatId } : {}),
+      },
+      { projection: { _id: 1 } },
+    );
     if (exists) return length;
   }
 
@@ -108,19 +100,17 @@ async function getSmartDefaultTimeKey({
   searchKey: AllowedChatSearchKey;
   wordLength: AllowedWordLength;
 }): Promise<AllowedChatTimeKey> {
-  let query = db
-    .selectFrom("leaderboard")
-    .select("createdAt")
-    .where("userId", "=", userId)
-    .where("wordLength", "=", wordLength.toString() as "4" | "5" | "6")
-    .orderBy("createdAt", "desc")
-    .limit(1);
-
-  if (searchKey === "group") {
-    query = query.where("chatId", "=", chatId);
-  }
-
-  const latestEntry = await query.executeTakeFirst();
+  const latestEntry = await db
+    .collection("leaderboard")
+    .find({
+      userId,
+      wordLength: wordLength.toString(),
+      ...(searchKey === "group" ? { chatId } : {}),
+    })
+    .project({ createdAt: 1 })
+    .sort({ createdAt: -1 })
+    .limit(1)
+    .next();
 
   if (!latestEntry) return "all";
 

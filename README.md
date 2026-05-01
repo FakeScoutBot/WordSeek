@@ -40,8 +40,7 @@
 ### Requirements
 - Bun.js Runtime (or Node.js)
 - Telegram Bot Token (create one via [BotFather](https://core.telegram.org/bots#botfather))
-- PostgreSQL database
-- Redis server (for caching and session management)
+- MongoDB database
 
 ### Steps
 1. **Clone the repository**:
@@ -56,21 +55,15 @@
    ```
 
 3. **Configure environment variables**:
-   Create a `.env` file in the root directory with the following variables:
-   ```env
-   BOT_TOKEN=your-telegram-bot-token
-   DATABASE_URL=your-postgresql-database-url
-   NODE_ENV=development
-   REDIS_URI=redis://127.0.0.1:6379
-   ```
+    Create a `.env` file in the root directory with the following variables:
+    ```env
+    BOT_TOKEN=your-telegram-bot-token
+    MONGODB_URI=your-mongodb-connection-string
+    MONGODB_DB=wordseek
+    NODE_ENV=development
+    ```
 
-4. **Set up the database**:
-   Run the database migrations to set up the required tables:
-   ```bash
-   bun run db:migrate latest
-   ```
-
-5. **Start the bot**:
+4. **Start the bot**:
    - **Development mode** (with hot reload):
      ```bash
      bun run dev
@@ -80,26 +73,18 @@
      bun run start
      ```
 
-### Additional Database Commands
-- **Create new migrations** (after schema changes):
-  ```bash
-  bun run db:migrate make migration-name
-  ```
-
 ## Environment Variables
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `BOT_TOKEN` | Your Telegram bot token from BotFather | `123456789:ABCdefGHIjklMNOpqrsTUVwxyz` |
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:password@localhost:5432/wordseek` |
+| `MONGODB_URI` | MongoDB connection string | `mongodb://user:password@localhost:27017/wordseek` |
+| `MONGODB_DB` | MongoDB database name | `wordseek` |
 | `NODE_ENV` | Environment mode | `development` or `production` |
-| `REDIS_URI` | Redis connection string | `redis://127.0.0.1:6379` |
 
 ## Technologies Used
 - **[grammy](https://grammy.dev/)**: Telegram Bot API framework.
-- **Drizzle ORM**: Simplified database queries and migrations.
-- **PostgreSQL**: Persistent storage for game data and leaderboards.
-- **Redis**: Caching and session management.
+- **MongoDB**: Persistent storage for game data, leaderboards, and caching.
 - **Bun.js**: Blazing fast JavaScript runtime and package manager.
 - **Zod**: Schema validation and type safety.
 
@@ -137,8 +122,7 @@ We welcome contributions to enhance the bot! Here's how you can help:
 ## Troubleshooting
 
 ### Common Issues
-- **Database connection errors**: Ensure PostgreSQL is running and the `DATABASE_URL` is correct.
-- **Redis connection errors**: Make sure Redis server is running on the specified port.
+- **Database connection errors**: Ensure MongoDB is running and the `MONGODB_URI` is correct.
 - **Bot not responding**: Verify your `BOT_TOKEN` is valid and the bot is not already running elsewhere.
 - **Migration errors**: Ensure you have proper database permissions and the database exists.
 

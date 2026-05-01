@@ -1,10 +1,8 @@
 import { Composer, GrammyError, InlineKeyboard } from "grammy";
 
-import { sql } from "kysely";
-
 import { db } from "../config/db";
 import { env } from "../config/env";
-import { redis } from "../config/redis";
+import { cache } from "../config/cache";
 import { captchaSchema } from "../schemas";
 import { getUserScores } from "../services/get-user-scores";
 import { getSmartDefaults } from "../util/get-smart-defaults";
@@ -38,6 +36,9 @@ import {
 } from "../commands/help";
 
 const composer = new Composer();
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 composer.on("callback_query:data", async (ctx) => {
   condition: if (ctx.callbackQuery.data.startsWith("leaderboard")) {
@@ -86,10 +87,12 @@ composer.on("callback_query:data", async (ctx) => {
     if (!username) break condition;
 
     const users = await db
-      .selectFrom("users")
-      .select(["id", "name", "username"])
-      .where(sql`lower(username)`, "=", username)
-      .execute();
+      .collection("users")
+      .find({
+        username: { $regex: new RegExp(`^${escapeRegExp(username)}$`, "i") },
+      })
+      .project({ id: 1, name: 1, username: 1 })
+      .toArray();
 
     if (users.length === 0) {
       return ctx.answerCallbackQuery({
@@ -125,10 +128,8 @@ composer.on("callback_query:data", async (ctx) => {
       const chatId = ctx.chat.id.toString();
 
       const userInfo = await db
-        .selectFrom("users")
-        .select(["name"])
-        .where("id", "=", userId)
-        .executeTakeFirst();
+        .collection("users")
+        .findOne({ id: userId }, { projection: { name: 1 } });
 
       if (!userInfo) {
         return ctx.answerCallbackQuery({
@@ -236,10 +237,8 @@ composer.on("callback_query:data", async (ctx) => {
       const chatId = ctx.chat.id.toString();
 
       const userInfo = await db
-        .selectFrom("users")
-        .select(["name"])
-        .where("id", "=", userId)
-        .executeTakeFirst();
+        .collection("users")
+        .findOne({ id: userId }, { projection: { name: 1 } });
 
       if (!userInfo) {
         return ctx.answerCallbackQuery({
@@ -248,17 +247,10 @@ composer.on("callback_query:data", async (ctx) => {
         });
       }
 
-      let hasAnyScoresQuery = db
-        .selectFrom("leaderboard")
-        .select("userId")
-        .where("userId", "=", userId)
-        .limit(1);
-
-      if (searchKey === "group") {
-        hasAnyScoresQuery = hasAnyScoresQuery.where("chatId", "=", chatId);
-      }
-
-      const hasAnyScores = !!(await hasAnyScoresQuery.executeTakeFirst());
+      const hasAnyScores = !!(await db.collection("leaderboard").findOne({
+        userId,
+        ...(searchKey === "group" ? { chatId } : {}),
+      }));
 
       const userScore = await getUserScores({
         chatId,
@@ -333,10 +325,8 @@ composer.on("callback_query:data", async (ctx) => {
     }
 
     const existingGame = await db
-      .selectFrom("games")
-      .selectAll()
-      .where("activeChat", "=", chatId.toString())
-      .executeTakeFirst();
+      .collection("games")
+      .findOne({ activeChat: chatId.toString() });
 
     if (!existingGame) {
       return await ctx.answerCallbackQuery({
@@ -347,7 +337,7 @@ composer.on("callback_query:data", async (ctx) => {
 
     const userId = ctx.from.id.toString();
     const voteKey = `vote:${chatId}`;
-    const voteDataStr = await redis.get(voteKey);
+    const voteDataStr = await cache.get(voteKey);
 
     if (!voteDataStr) {
       return await ctx.answerCallbackQuery({
@@ -406,7 +396,7 @@ composer.on("callback_query:data", async (ctx) => {
     voteData.voters.push(userId);
 
     if (voteData.voters.length >= 3) {
-      await redis.del(voteKey);
+      await cache.del(voteKey);
 
       const reason = "<b>Game ended - 3 players voted to end the game</b>";
       await ctx.deleteMessage();
@@ -417,7 +407,7 @@ composer.on("callback_query:data", async (ctx) => {
       });
     }
 
-    await redis.setex(voteKey, 300, JSON.stringify(voteData));
+    await cache.setex(voteKey, 300, JSON.stringify(voteData));
 
     const votesNeeded = 3 - voteData.voters.length;
 
@@ -525,7 +515,7 @@ composer.on("callback_query:data", async (ctx) => {
     if (!chatId) return;
 
     const key = `captcha:${chatId}:${userId}`;
-    const raw = await redis.get(key);
+    const raw = await cache.get(key);
 
     if (!raw) {
       return ctx.answerCallbackQuery({
@@ -562,7 +552,7 @@ composer.on("callback_query:data", async (ctx) => {
         JSON.stringify(session.progress) === JSON.stringify(session.answer);
 
       if (success) {
-        await redis.del(key);
+        await cache.del(key);
 
         await ctx.api.sendMessage(
           session.adminId,
@@ -587,7 +577,7 @@ composer.on("callback_query:data", async (ctx) => {
       session.attempts += 1;
 
       if (session.attempts >= 3) {
-        await redis.del(key);
+        await cache.del(key);
 
         await ctx.api.sendMessage(
           session.adminId,
@@ -613,7 +603,7 @@ composer.on("callback_query:data", async (ctx) => {
 
       session.progress = [];
 
-      await redis.set(key, JSON.stringify(session), "KEEPTTL");
+      await cache.set(key, JSON.stringify(session), "KEEPTTL");
 
       return ctx
         .editMessageText(
@@ -632,7 +622,7 @@ composer.on("callback_query:data", async (ctx) => {
         .catch(() => {});
     }
 
-    await redis.set(key, JSON.stringify(session), "KEEPTTL");
+    await cache.set(key, JSON.stringify(session), "KEEPTTL");
 
     await ctx
       .editMessageText(

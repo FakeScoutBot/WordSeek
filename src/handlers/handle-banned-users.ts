@@ -6,10 +6,8 @@ const composer = new Composer();
 
 composer.on("message", async (ctx, next) => {
   const isUserBanned = await db
-    .selectFrom("bannedUsers")
-    .selectAll()
-    .where("userId", "=", ctx.from.id.toString())
-    .executeTakeFirst();
+    .collection("bannedUsers")
+    .findOne({ userId: ctx.from.id.toString() });
 
   if (!isUserBanned) return await next();
 

@@ -38,10 +38,7 @@ That's all I need:  no other permissions are necessary.`,
     new_chat_member.status === "left" ||
     new_chat_member.status === "kicked"
   ) {
-    await db
-      .deleteFrom("broadcastChats")
-      .where("id", "=", chat.id.toString())
-      .execute();
+    await db.collection("broadcastChats").deleteOne({ id: chat.id.toString() });
 
     console.log(`Bot was removed/blocked from chat ${chat.id}`);
   }

@@ -34,37 +34,21 @@ composer.command("stats", async (ctx) => {
   const cpus = os.cpus();
   const loadAvg = os.loadavg();
 
-  const [
-    allUsersResult,
-    activePlayersResult,
-    activeGroupsResult,
-    totalGroupsResult,
-  ] = await Promise.all([
-    db
-      .selectFrom("users")
-      .select((eb) => eb.fn.count("id").as("count"))
-      .executeTakeFirstOrThrow(),
-    db
-      .selectFrom("leaderboard")
-      .select((eb) => eb.fn.count("chatId").distinct().as("count"))
-      .where("chatId", "not like", "-1%")
-      .executeTakeFirstOrThrow(),
-    db
-      .selectFrom("leaderboard")
-      .select((eb) => eb.fn.count("chatId").distinct().as("count"))
-      .where("chatId", "like", "-1%")
-      .executeTakeFirstOrThrow(),
-    db
-      .selectFrom("broadcastChats")
-      .select((eb) => eb.fn.count("id").as("count"))
-      .where("id", "like", "-1%")
-      .executeTakeFirstOrThrow(),
-  ]);
-
-  const allUsersCount = allUsersResult.count;
-  const activePlayersCount = activePlayersResult.count;
-  const activeGroupsCount = activeGroupsResult.count;
-  const totalGroupsCount = totalGroupsResult.count;
+  const [allUsersCount, activePlayersCount, activeGroupsCount, totalGroupsCount] =
+    await Promise.all([
+      db.collection("users").countDocuments(),
+      db
+        .collection("leaderboard")
+        .distinct("chatId", { chatId: { $not: { $regex: /^-1/ } } })
+        .then((ids) => ids.length),
+      db
+        .collection("leaderboard")
+        .distinct("chatId", { chatId: { $regex: /^-1/ } })
+        .then((ids) => ids.length),
+      db
+        .collection("broadcastChats")
+        .countDocuments({ id: { $regex: /^-1/ } }),
+    ]);
 
   const formatBytes = (bytes: number) => {
     if (!bytes) return "0 B";

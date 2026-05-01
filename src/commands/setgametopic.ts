@@ -1,12 +1,8 @@
 import { Composer } from "grammy";
 
-import pg from "pg";
-
 import { db } from "../config/db";
 import { CommandsHelper } from "../util/commands-helper";
 import { adminOnlyGuards, runGuards } from "../util/guards";
-
-const { DatabaseError } = pg;
 
 const composer = new Composer();
 
@@ -23,22 +19,31 @@ composer.command("setgametopic", async (ctx) => {
 
   const topicId = ctx.msg.message_thread_id?.toString() || "general";
 
-  try {
-    await db
-      .insertInto("chatGameTopics")
-      .values({ chatId: ctx.chat.id.toString(), topicId })
-      .execute();
+  const existing = await db.collection("chatGameTopics").findOne({
+    chatId: ctx.chat.id.toString(),
+    topicId,
+  });
 
-    await ctx.reply(
-      `@${ctx.me.username} will now use this topic for the game.`,
+  if (existing) {
+    return await ctx.reply(
+      "Game has already been set for this topic.\nUse /unsetgametopic to unset it first.",
     );
-  } catch (err) {
-    if (err instanceof DatabaseError && err.code === "23505") {
-      return await ctx.reply(
-        "Game has already been set for this topic.\nUse /unsetgametopic to unset it first.",
-      );
-    }
   }
+
+  const now = new Date();
+  await db.collection("chatGameTopics").insertOne({
+    _id: `${ctx.chat.id}:${topicId}`,
+    chatId: ctx.chat.id.toString(),
+    topicId,
+    allowedLengths: [5, 4, 6],
+    shouldRecreateOnExpire: false,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await ctx.reply(
+    `@${ctx.me.username} will now use this topic for the game.`,
+  );
 });
 
 CommandsHelper.addNewCommand("setgametopic", "Set current topic for the game");

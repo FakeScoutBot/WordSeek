@@ -3,7 +3,7 @@ import crypto from "crypto";
 import z from "zod";
 
 import { SYSTEM_PROMPT } from "../config/constants";
-import { db } from "../config/db";
+import { createId, db } from "../config/db";
 import { env } from "../config/env";
 import words from "../data/daily-word-lists.json";
 import { APIKeyManager } from "../util/key-manager";
@@ -129,22 +129,15 @@ async function resetStreaksForInactivePlayers(yesterdayDate: string) {
 
     const yesterdayDateTime = new Date(yesterdayDate + "T00:00:00");
 
-    const result = await db
-      .updateTable("userStats")
-      .set({ currentStreak: 0 })
-      .where("currentStreak", ">", 0)
-      .where((eb) =>
-        eb.or([
-          eb("lastGuessed", "is", null),
-          eb("lastGuessed", "<", yesterdayDateTime),
-        ]),
-      )
-      .execute();
-
-    const resetCount = result.reduce(
-      (sum, r) => sum + Number(r.numUpdatedRows || 0n),
-      0,
+    const result = await db.collection("userStats").updateMany(
+      {
+        currentStreak: { $gt: 0 },
+        $or: [{ lastGuessed: null }, { lastGuessed: { $lt: yesterdayDateTime } }],
+      },
+      { $set: { currentStreak: 0, updatedAt: new Date() } },
     );
+
+    const resetCount = result.modifiedCount;
 
     if (resetCount > 0) {
       console.log(`Reset streaks for ${resetCount} inactive players`);
@@ -157,31 +150,40 @@ async function resetStreaksForInactivePlayers(yesterdayDate: string) {
 }
 
 async function generateDailyWordInternal(gameDate: string) {
+  const gameDateValue = new Date(`${gameDate}T00:00:00`);
   const existingWord = await db
-    .selectFrom("dailyWords")
-    .selectAll()
-    .where("date", "=", new Date(gameDate))
-    .executeTakeFirst();
+    .collection("dailyWords")
+    .findOne({ date: gameDateValue });
 
   if (existingWord) return existingWord;
 
   const seed = seedFromSecret(env.DAILY_WORDLE_SECRET);
   const shuffled = deterministicShuffle(seed);
-  const word = getWordOfTheDay(shuffled);
+  const dayNumber = getDayNumberForDate(gameDate);
+  if (dayNumber < 0) {
+    console.error(
+      "DAILY_WORDLE_START_DATE is after the requested game date. Skipping generation.",
+    );
+    return null;
+  }
+  const word = getWordOfTheDay(shuffled, dayNumber);
 
   const details = await getWordDetails(word);
 
-  const insertedWord = await db
-    .insertInto("dailyWords")
-    .values({
-      word,
-      date: gameDate,
-      meaning: details?.meaning,
-      phonetic: details?.phonetic,
-      sentence: details?.sentence,
-    })
-    .returningAll()
-    .executeTakeFirstOrThrow();
+  const now = new Date();
+  const dailyWord = {
+    id: createId(),
+    word,
+    date: gameDateValue,
+    dayNumber,
+    meaning: details?.meaning ?? null,
+    phonetic: details?.phonetic ?? null,
+    sentence: details?.sentence ?? null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await db.collection("dailyWords").insertOne({ _id: dailyWord.id, ...dailyWord });
 
   const yesterday = new Date(gameDate);
   yesterday.setDate(yesterday.getDate() - 1);
@@ -190,7 +192,7 @@ async function generateDailyWordInternal(gameDate: string) {
   await resetStreaksForInactivePlayers(yesterdayString);
 
   console.log(`Successfully generated daily word: ${word} for ${gameDate}`);
-  return insertedWord;
+  return dailyWord;
 }
 
 async function generateDailyWord() {
@@ -248,16 +250,18 @@ function deterministicShuffle(seed: number) {
   return arr;
 }
 
-function getWordOfTheDay(shuffled: string[]) {
-  const msPerDay = 24 * 60 * 60 * 1000;
+function getWordOfTheDay(shuffled: string[], dayNumber: number) {
+  return shuffled[dayNumber % shuffled.length];
+}
 
+function getDayNumberForDate(dateString: string) {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const targetDate = new Date(`${dateString}T00:00:00`);
   const dayNumber = Math.floor(
-    (Date.now() - env.DAILY_WORDLE_START_DATE.getTime()) / msPerDay,
+    (targetDate.getTime() - env.DAILY_WORDLE_START_DATE.getTime()) / msPerDay,
   );
 
-  return shuffled[
-    ((dayNumber % shuffled.length) + shuffled.length) % shuffled.length
-  ];
+  return dayNumber;
 }
 
 export const dailyWordleCron = new CronJob(

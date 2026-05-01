@@ -1,8 +1,7 @@
 import { CommandContext, Composer, Context } from "grammy";
+import { MongoServerError } from "mongodb";
 
-import { DatabaseError } from "pg";
-
-import { db } from "../config/db";
+import { createId, db } from "../config/db";
 import { CommandsHelper } from "../util/commands-helper";
 import { regularGameGuards, runGuards } from "../util/guards";
 import { type WordLength, WordSelector } from "../util/word-selector";
@@ -24,12 +23,10 @@ async function startGame(
     const guard = await runGuards(ctx, regularGameGuards);
     if (!guard.ok) return ctx.reply(guard.message);
 
-    const topicSettings = await db
-      .selectFrom("chatGameTopics")
-      .selectAll()
-      .where("chatId", "=", chatId.toString())
-      .where("topicId", "=", topicId)
-      .executeTakeFirst();
+    const topicSettings = await db.collection("chatGameTopics").findOne({
+      chatId: chatId.toString(),
+      topicId,
+    });
 
     const allowedLengths: WordLength[] =
       (topicSettings?.allowedLengths as WordLength[]) ?? GLOBAL_VALID_LENGTHS;
@@ -70,24 +67,37 @@ async function startGame(
     const wordSelector = new WordSelector();
     const randomWord = await wordSelector.getRandomWord(chatId, wordLength);
 
-    await db
-      .insertInto("games")
-      .values({
-        word: randomWord,
-        activeChat: chatId.toString(),
-        topicId,
-        startedBy: ctx.from.id.toString(),
-      })
-      .execute();
+    const existingGame = await db.collection("games").findOne({
+      activeChat: chatId.toString(),
+      topicId,
+    });
 
-    return ctx.reply(`Game started! Guess the ${wordLength}-letter word!`);
-  } catch (error) {
-    if (error instanceof DatabaseError && error.code === "23505") {
+    if (existingGame) {
       return ctx.reply(
         "There is already a game in progress in this chat. Use /end to end the current game.",
       );
     }
 
+    const now = new Date();
+    const gameId = createId();
+    await db.collection("games").insertOne({
+      _id: gameId,
+      id: gameId,
+      word: randomWord,
+      activeChat: chatId.toString(),
+      topicId,
+      startedBy: ctx.from.id.toString(),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return ctx.reply(`Game started! Guess the ${wordLength}-letter word!`);
+  } catch (error) {
+    if (error instanceof MongoServerError && error.code === 11000) {
+      return ctx.reply(
+        "There is already a game in progress in this chat. Use /end to end the current game.",
+      );
+    }
     console.error(error);
     return ctx.reply("Something went wrong. Please try again.");
   }

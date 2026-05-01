@@ -19,11 +19,10 @@ composer.command("unsetgametopic", async (ctx) => {
 
   const topicId = ctx.msg.message_thread_id?.toString() || "general";
 
-  await db
-    .deleteFrom("chatGameTopics")
-    .where("chatId", "=", ctx.chat.id.toString())
-    .where("topicId", "=", topicId)
-    .execute();
+  await db.collection("chatGameTopics").deleteOne({
+    chatId: ctx.chat.id.toString(),
+    topicId,
+  });
 
   await ctx.reply(`@${ctx.me.username} won't use this topic for the game.`);
 });

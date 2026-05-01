@@ -1,7 +1,7 @@
 import { Composer, InputFile } from "grammy";
 
+import { cache } from "../config/cache";
 import { db } from "../config/db";
-import { redis } from "../config/redis";
 import { CommandsHelper } from "../util/commands-helper";
 import { dailyGameGuards, runGuards } from "../util/guards";
 import { generateWordleImage } from "../handlers/on-message";
@@ -30,23 +30,28 @@ composer.command("daily", async (ctx) => {
       );
     }
 
-    await db
-      .insertInto("userStats")
-      .values({
-        userId,
-        highestStreak: 0,
-        currentStreak: 0,
-        lastGuessed: null,
-      })
-      .onConflict((oc) => oc.column("userId").doNothing())
-      .execute();
+    const now = new Date();
+    await db.collection("userStats").updateOne(
+      { userId },
+      {
+        $setOnInsert: {
+          _id: userId,
+          userId,
+          highestStreak: 0,
+          currentStreak: 0,
+          lastGuessed: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      { upsert: true },
+    );
 
     const existingGuesses = await db
-      .selectFrom("dailyGuesses")
-      .selectAll()
-      .where("userId", "=", userId)
-      .where("dailyWordId", "=", dailyWord.id)
-      .execute();
+      .collection("dailyGuesses")
+      .find({ userId, dailyWordId: dailyWord.id })
+      .sort({ attemptNumber: 1 })
+      .toArray();
 
     if (existingGuesses.length > 0) {
       const lastGuess = existingGuesses[existingGuesses.length - 1];
@@ -64,7 +69,7 @@ composer.command("daily", async (ctx) => {
       }
     }
 
-    await redis.setex(
+    await cache.setex(
       `daily_wordle:${userId}`,
       86400,
       JSON.stringify({
@@ -105,7 +110,7 @@ composer.command("pausedaily", async (ctx) => {
   try {
     const userId = ctx.from.id.toString();
 
-    const dailyGameData = await redis.get(`daily_wordle:${userId}`);
+    const dailyGameData = await cache.get(`daily_wordle:${userId}`);
 
     if (!dailyGameData) {
       return ctx.reply(
@@ -113,7 +118,7 @@ composer.command("pausedaily", async (ctx) => {
       );
     }
 
-    await redis.del(`daily_wordle:${userId}`);
+    await cache.del(`daily_wordle:${userId}`);
 
     return ctx.reply(
       "✅ Your WordSeek of the Day game has been paused. You can now play regular WordSeek.\n\nTo play today's WordSeek again, use /daily (your previous attempts will still count).",

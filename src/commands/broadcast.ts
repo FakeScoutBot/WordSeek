@@ -3,9 +3,9 @@ import { Api, Composer } from "grammy";
 import { z } from "zod";
 
 import { bot } from "../config/bot";
+import { cache } from "../config/cache";
 import { db } from "../config/db";
 import { env } from "../config/env";
-import { redis } from "../config/redis";
 import { formatDuration } from "../util/format-duration";
 
 const composer = new Composer();
@@ -30,28 +30,28 @@ const BROADCAST_KEY = "broadcast:state";
 const BROADCAST_LOCK_KEY = "broadcast:lock";
 
 async function saveBroadcastState(state: BroadcastState) {
-  await redis.set(BROADCAST_KEY, JSON.stringify(state), "EX", 86400);
+  await cache.set(BROADCAST_KEY, JSON.stringify(state), "EX", 86400);
 }
 
 async function getBroadcastState() {
-  const data = await redis.get(BROADCAST_KEY);
+  const data = await cache.get(BROADCAST_KEY);
   if (!data) return null;
 
   try {
     return broadcastStateSchema.parse(JSON.parse(data));
   } catch (error) {
-    console.error("Invalid broadcast state in Redis:", error);
+    console.error("Invalid broadcast state in cache:", error);
     return null;
   }
 }
 
 async function clearBroadcastState() {
-  await redis.del(BROADCAST_KEY);
-  await redis.del(BROADCAST_LOCK_KEY);
+  await cache.del(BROADCAST_KEY);
+  await cache.del(BROADCAST_LOCK_KEY);
 }
 
 async function acquireBroadcastLock() {
-  const result = await redis.set(BROADCAST_LOCK_KEY, "1", "EX", 3600, "NX");
+  const result = await cache.set(BROADCAST_LOCK_KEY, "1", "EX", 3600, "NX");
   return result === "OK";
 }
 
@@ -79,10 +79,7 @@ async function performBroadcast(
 
       (async () => {
         try {
-          await db
-            .deleteFrom("broadcastChats")
-            .where("id", "=", chat.id)
-            .execute();
+          await db.collection("broadcastChats").deleteOne({ id: chat.id });
           state.deletedCount++;
         } catch (deleteError) {}
       })();
@@ -173,10 +170,10 @@ Use /broadcast_status to check status or /broadcast_cancel to cancel.`,
   }
 
   const chats = await db
-    .selectFrom("broadcastChats")
-    .selectAll()
-    .orderBy("broadcastChats.createdAt", "asc")
-    .execute();
+    .collection("broadcastChats")
+    .find()
+    .sort({ createdAt: 1 })
+    .toArray();
 
   if (chats.length === 0) {
     await clearBroadcastState();

@@ -1,7 +1,7 @@
 import { Context } from "grammy";
 
+import { cache } from "../config/cache";
 import { db } from "../config/db";
-import { redis } from "../config/redis";
 import { dailyWordleSchema } from "../handlers/on-message";
 
 type GuardResult = { ok: true } | { ok: false; message: string };
@@ -23,7 +23,7 @@ export async function requireNoActiveDailyGame(
   if (!ctx.from) return { ok: true };
   const userId = ctx.from.id.toString();
 
-  const dailyGameData = await redis.get(`daily_wordle:${userId}`);
+  const dailyGameData = await cache.get(`daily_wordle:${userId}`);
   const result = dailyWordleSchema.safeParse(JSON.parse(dailyGameData || "{}"));
 
   if (result.data) {
@@ -41,10 +41,8 @@ async function requireNoActiveRegularGame(ctx: Context): Promise<GuardResult> {
 
   const userId = ctx.from.id.toString();
   const activeGame = await db
-    .selectFrom("games")
-    .selectAll()
-    .where("activeChat", "=", userId)
-    .executeTakeFirst();
+    .collection("games")
+    .findOne({ activeChat: userId });
 
   if (activeGame) {
     return {
@@ -61,10 +59,9 @@ export async function requireAllowedTopic(ctx: Context): Promise<GuardResult> {
 
   const chatId = ctx.chat.id;
   const topicData = await db
-    .selectFrom("chatGameTopics")
-    .where("chatId", "=", chatId.toString())
-    .selectAll()
-    .execute();
+    .collection("chatGameTopics")
+    .find({ chatId: chatId.toString() })
+    .toArray();
 
   const topicIds = topicData.map((t) => t.topicId);
   const currentTopicId = ctx.msg.message_thread_id?.toString() || "general";

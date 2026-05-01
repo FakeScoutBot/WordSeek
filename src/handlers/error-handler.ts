@@ -1,7 +1,7 @@
 import { BotError, Context, GrammyError, HttpError } from "grammy";
 
+import { cache } from "../config/cache";
 import { db } from "../config/db";
-import { redis } from "../config/redis";
 
 export async function errorHandler(error: BotError<Context>) {
   const ctx = error.ctx;
@@ -32,10 +32,9 @@ export async function errorHandler(error: BotError<Context>) {
       ctx.msg
     ) {
       const topicsData = await db
-        .selectFrom("chatGameTopics")
-        .selectAll()
-        .where("chatId", "=", ctx.chatId.toString())
-        .execute();
+        .collection("chatGameTopics")
+        .find({ chatId: ctx.chatId.toString() })
+        .toArray();
       const currentTopicId = ctx.msg.message_thread_id?.toString();
       if (!currentTopicId) break conditions;
 
@@ -55,23 +54,23 @@ export async function errorHandler(error: BotError<Context>) {
         );
         await ctx.deleteForumTopic();
         await ctx.api.deleteMessage(ctx.chatId, message.message_id);
-        await db
-          .insertInto("chatGameTopics")
-          .values({
-            chatId: ctx.chatId.toString(),
-            topicId: createdTopic.message_thread_id.toString(),
-            iconCustomEmojiId: createdTopic.icon_custom_emoji_id,
-            shouldRecreateOnExpire: true,
-            allowedLengths: topic.allowedLengths,
-            name: topic.name,
-          })
-          .execute();
-        await db
-          .deleteFrom("chatGameTopics")
-          .where("chatId", "=", ctx.chatId.toString())
-          .where("topicId", "=", currentTopicId)
-          .execute();
-        await redis.del(`vote:${ctx.chatId}`);
+        const now = new Date();
+        await db.collection("chatGameTopics").insertOne({
+          _id: `${ctx.chatId}:${createdTopic.message_thread_id}`,
+          chatId: ctx.chatId.toString(),
+          topicId: createdTopic.message_thread_id.toString(),
+          iconCustomEmojiId: createdTopic.icon_custom_emoji_id,
+          shouldRecreateOnExpire: true,
+          allowedLengths: topic.allowedLengths,
+          name: topic.name,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await db.collection("chatGameTopics").deleteOne({
+          chatId: ctx.chatId.toString(),
+          topicId: currentTopicId,
+        });
+        await cache.del(`vote:${ctx.chatId}`);
 
         await ctx.api.sendMessage(
           ctx.chatId,

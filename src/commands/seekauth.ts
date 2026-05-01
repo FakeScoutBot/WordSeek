@@ -1,12 +1,13 @@
 import { Composer, Context } from "grammy";
 
-import { sql } from "kysely";
-
 import { db } from "../config/db";
 import { env } from "../config/env";
 import { CommandsHelper } from "../util/commands-helper";
 
 const composer = new Composer();
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export async function getTargetUser(
   ctx: Context,
@@ -72,27 +73,32 @@ export async function getTargetUser(
         username: user.username,
       };
 
-      await db
-        .insertInto("users")
-        .values(userData)
-        .onConflict((oc) =>
-          oc.column("id").doUpdateSet({
+      const now = new Date();
+      await db.collection("users").updateOne(
+        { id: userData.id },
+        {
+          $set: {
             name: userData.name,
             username: userData.username,
-          }),
-        )
-        .execute();
+            updatedAt: now,
+          },
+          $setOnInsert: {
+            _id: userData.id,
+            id: userData.id,
+            createdAt: now,
+          },
+        },
+        { upsert: true },
+      );
       return userData;
     }
 
     if (identifier && entity.type === "mention") {
       const username = identifier.slice(1);
 
-      const user = await db
-        .selectFrom("users")
-        .select(["id", "name", "username"])
-        .where(sql`lower(username)`, "=", username.toLowerCase())
-        .executeTakeFirst();
+      const user = await db.collection("users").findOne({
+        username: { $regex: new RegExp(`^${escapeRegExp(username)}$`, "i") },
+      });
 
       return user || null;
     }
@@ -114,11 +120,7 @@ export async function getTargetUser(
       // Fall through to database
     }
 
-    const user = await db
-      .selectFrom("users")
-      .select(["id", "name", "username"])
-      .where("id", "=", identifier)
-      .executeTakeFirst();
+    const user = await db.collection("users").findOne({ id: identifier });
 
     return user || null;
   }
@@ -154,12 +156,22 @@ composer.command("seekauth", async (ctx) => {
   const action = parts[0]!.toLowerCase();
 
   if (action === "list") {
-    const authorizedUsers = await db
-      .selectFrom("authorizedUsers")
-      .innerJoin("users", "users.id", "authorizedUsers.userId")
-      .where("authorizedUsers.chatId", "=", chatId)
-      .select(["users.id", "users.name", "users.username"])
-      .execute();
+    const authorizedEntries = await db
+      .collection("authorizedUsers")
+      .find({ chatId })
+      .toArray();
+    const userIds = authorizedEntries.map((entry) => entry.userId);
+    const users = await db
+      .collection("users")
+      .find({ id: { $in: userIds } })
+      .toArray();
+    const userMap = new Map(users.map((user) => [user.id, user]));
+    const authorizedUsers = authorizedEntries
+      .map((entry) => userMap.get(entry.userId))
+      .filter(
+        (user): user is { id: string; name: string; username?: string | null } =>
+          !!user,
+      );
 
     if (authorizedUsers.length === 0) {
       return await ctx.reply(
@@ -189,12 +201,10 @@ composer.command("seekauth", async (ctx) => {
     }
 
     const deleted = await db
-      .deleteFrom("authorizedUsers")
-      .where("chatId", "=", chatId)
-      .where("userId", "=", targetUser.id)
-      .executeTakeFirst();
+      .collection("authorizedUsers")
+      .deleteOne({ chatId, userId: targetUser.id });
 
-    if (deleted.numDeletedRows === 0n) {
+    if (!deleted.deletedCount) {
       return await ctx.reply("❌ This user is not authorized.", replyConfig);
     }
 
@@ -218,10 +228,8 @@ composer.command("seekauth", async (ctx) => {
   }
 
   const existing = await db
-    .selectFrom("authorizedUsers")
-    .where("chatId", "=", chatId)
-    .where("userId", "=", targetUser.id)
-    .executeTakeFirst();
+    .collection("authorizedUsers")
+    .findOne({ chatId, userId: targetUser.id });
 
   if (existing) {
     return await ctx.reply(
@@ -230,14 +238,14 @@ composer.command("seekauth", async (ctx) => {
     );
   }
 
-  await db
-    .insertInto("authorizedUsers")
-    .values({
-      chatId,
-      userId: targetUser.id,
-      authorizedBy: userId.toString(),
-    })
-    .execute();
+  const now = new Date();
+  await db.collection("authorizedUsers").insertOne({
+    _id: `${chatId}:${targetUser.id}`,
+    chatId,
+    userId: targetUser.id,
+    authorizedBy: userId.toString(),
+    createdAt: now,
+  });
 
   const userName = targetUser.username
     ? `@${targetUser.username} (${targetUser.name})`

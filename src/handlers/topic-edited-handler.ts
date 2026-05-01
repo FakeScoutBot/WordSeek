@@ -25,12 +25,10 @@ composer.on("message:forum_topic_edited", async (ctx) => {
   const topicIdForQuery = ctx.msg.message_thread_id.toString();
 
   try {
-    await db
-      .updateTable("chatGameTopics")
-      .set(updates)
-      .where("chatGameTopics.chatId", "=", chatIdForQuery)
-      .where("topicId", "=", topicIdForQuery)
-      .execute();
+    await db.collection("chatGameTopics").updateOne(
+      { chatId: chatIdForQuery, topicId: topicIdForQuery },
+      { $set: { ...updates, updatedAt: new Date() } },
+    );
   } catch (err) {
     console.error("Failed updating chatGameTopics:", {
       chatId: chatIdForQuery,
