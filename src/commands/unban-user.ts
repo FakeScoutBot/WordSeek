@@ -11,29 +11,23 @@ composer.command("unban", async (ctx) => {
 
   const isUsername = ctx.match.startsWith("@");
 
-  const user = await db
-    .selectFrom("users")
-    .selectAll()
-    .where(
-      isUsername ? "username" : "id",
-      "=",
-      isUsername ? ctx.match.substring(1) : ctx.match,
-    )
-    .executeTakeFirst();
+  const user = await db.collection("users").findOne({
+    [isUsername ? "username" : "id"]: isUsername
+      ? ctx.match.substring(1)
+      : ctx.match,
+  });
 
   if (!user) return ctx.reply("Can't find the user");
 
   const existingBan = await db
-    .selectFrom("bannedUsers")
-    .selectAll()
-    .where("userId", "=", user.id)
-    .executeTakeFirst();
+    .collection("bannedUsers")
+    .findOne({ userId: user.id });
 
   if (!existingBan) {
     return ctx.reply(`⚠️ ${user.name} is not banned`);
   }
 
-  await db.deleteFrom("bannedUsers").where("userId", "=", user.id).execute();
+  await db.collection("bannedUsers").deleteOne({ userId: user.id });
 
   ctx.reply(`Unbanned ${user.name} from the bot`);
 });

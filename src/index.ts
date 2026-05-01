@@ -3,7 +3,6 @@ import { run, sequentialize } from "@grammyjs/runner";
 
 import { bot } from "./config/bot";
 import { commands } from "./commands";
-import { captchaQueue } from "./queues/captcha-queue";
 import { errorHandler } from "./handlers/error-handler";
 import { onMessageHander } from "./handlers/on-message";
 import { CommandsHelper } from "./util/commands-helper";
@@ -14,6 +13,7 @@ import { onBotAddedInChat } from "./handlers/on-bot-added-in-chat";
 import { topicEditedHandler } from "./handlers/topic-edited-handler";
 import { trackMessagesHandler } from "./handlers/track-messages-handler";
 import { userAndChatSyncHandler } from "./handlers/user-and-chat-sync-handler";
+import "./queues/captcha-queue";
 import {
   dailyWordleCron,
   ensureDailyWordExists,

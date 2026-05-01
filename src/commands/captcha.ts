@@ -1,11 +1,11 @@
 import { Composer, InlineKeyboard } from "grammy";
 
+import { cache } from "../config/cache";
 import { db } from "../config/db";
 import { env } from "../config/env";
-import { redis } from "../config/redis";
 import { captchaSchema } from "../schemas";
 import { SLOT_SYMBOLS } from "../config/constants";
-import { captchaQueue } from "../queues/captcha-queue";
+import { scheduleCaptchaExpiry } from "../queues/captcha-queue";
 
 const composer = new Composer();
 
@@ -101,7 +101,7 @@ composer.command("captcha", async (ctx) => {
   }
 
   const key = `captcha:${chatId}:${userId}`;
-  const existing = await redis.get(key);
+  const existing = await cache.get(key);
 
   if (existing) {
     const session = JSON.parse(existing);
@@ -113,11 +113,7 @@ composer.command("captcha", async (ctx) => {
     );
   }
 
-  const user = await db
-    .selectFrom("users")
-    .select(["id", "name", "username"])
-    .where("id", "=", userId)
-    .executeTakeFirst();
+  const user = await db.collection("users").findOne({ id: userId });
 
   const mention = formatUserMention({
     id: userId,
@@ -160,13 +156,14 @@ composer.command("captcha", async (ctx) => {
     username: user?.username,
   });
 
-  await redis.set(key, JSON.stringify(session), "EX", 80); // 80 second to make sure bullmq fires
+  await cache.set(key, JSON.stringify(session), "EX", 80); // 80 second to make sure expiry job fires
 
-  await captchaQueue.add(
-    "expire",
-    { chatId, userId, messageId: msg.message_id },
-    { delay: 60_000, removeOnComplete: true },
-  );
+  await scheduleCaptchaExpiry({
+    chatId,
+    userId,
+    messageId: msg.message_id,
+    delayMs: 60_000,
+  });
 
   const mentionText = user
     ? formatUserMention({

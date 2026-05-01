@@ -1,6 +1,6 @@
 import { randomInt } from "crypto";
 
-import { redis } from "../config/redis";
+import { cache } from "../config/cache";
 import commonSixWords from "../data/common-six.json";
 import commonFiveWords from "../data/common-five.json";
 import commonFourWords from "../data/common-four.json";
@@ -42,7 +42,7 @@ export class WordSelector {
     const wordList = WORD_LIST[wordLength];
 
     try {
-      const pipeline = redis.pipeline();
+      const pipeline = cache.pipeline();
       pipeline.smembers(historyKey);
       pipeline.scard(historyKey);
       const results = await pipeline.exec();
@@ -62,9 +62,9 @@ export class WordSelector {
         const recentWords = usedWords.slice(
           -Math.floor(this.config.resetThreshold / 2),
         );
-        await redis.del(historyKey);
+        await cache.del(historyKey);
         if (recentWords.length > 0) {
-          await redis.sadd(historyKey, ...recentWords);
+          await cache.sadd(historyKey, ...recentWords);
         }
         return this.getRandomWord(chatId, wordLength);
       }
@@ -72,7 +72,7 @@ export class WordSelector {
       const randomWord =
         availableWords[randomInt(0, availableWords.length)].toLowerCase();
 
-      const updatePipeline = redis.pipeline();
+      const updatePipeline = cache.pipeline();
       updatePipeline.sadd(historyKey, randomWord);
       updatePipeline.expire(historyKey, this.config.ttlSeconds);
 
@@ -85,20 +85,20 @@ export class WordSelector {
 
       return randomWord;
     } catch (error) {
-      console.error("Redis error, using fallback:", error);
+      console.error("Cache error, using fallback:", error);
       return wordList[randomInt(0, wordList.length)].toLowerCase();
     }
   }
 
   async resetChat(chatId: string | number, wordLength: WordLength = 5) {
-    await redis.del(this.historyKey(chatId, wordLength));
+    await cache.del(this.historyKey(chatId, wordLength));
   }
 
   async getChatStats(chatId: string | number, wordLength: WordLength = 5) {
     const wordList = WORD_LIST[wordLength];
     const totalCount = wordList.length;
     try {
-      const usedCount = await redis.scard(this.historyKey(chatId, wordLength));
+      const usedCount = await cache.scard(this.historyKey(chatId, wordLength));
       return {
         usedCount,
         availableCount: totalCount - usedCount,
@@ -111,7 +111,7 @@ export class WordSelector {
 
   async getRecentWords(chatId: string | number, wordLength: WordLength = 5) {
     try {
-      return await redis.smembers(this.historyKey(chatId, wordLength));
+      return await cache.smembers(this.historyKey(chatId, wordLength));
     } catch (error) {
       console.error("Error getting recent words:", error);
       return [];

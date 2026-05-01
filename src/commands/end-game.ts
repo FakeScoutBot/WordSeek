@@ -1,8 +1,8 @@
 import { Composer, Context } from "grammy";
 
+import { cache } from "../config/cache";
 import { db } from "../config/db";
 import { env } from "../config/env";
-import { redis } from "../config/redis";
 import { CommandsHelper } from "../util/commands-helper";
 // import { formatWordDetails } from "../util/format-word-details";
 import { requireAllowedTopic, runGuards } from "../util/guards";
@@ -11,10 +11,8 @@ const composer = new Composer();
 
 export async function isUserAuthorized(userId: string, chatId: string) {
   const authorized = await db
-    .selectFrom("authorizedUsers")
-    .where("userId", "=", userId)
-    .where("chatId", "=", chatId)
-    .executeTakeFirst();
+    .collection("authorizedUsers")
+    .findOne({ userId, chatId });
 
   return !!authorized;
 }
@@ -26,12 +24,14 @@ export async function endGame(
   reason: string,
 ) {
   const game = await db
-    .deleteFrom("games")
-    .where("activeChat", "=", String(chatId))
-    .returning("word")
-    .executeTakeFirst();
+    .collection("games")
+    .findOneAndDelete({ activeChat: String(chatId) });
 
-  const wordLength = game?.word ? game.word.length : 5;
+  if (game?.value?.id) {
+    await db.collection("guesses").deleteMany({ gameId: game.value.id });
+  }
+
+  const wordLength = game?.value?.word ? game.value.word.length : 5;
 
   //   await ctx.reply(
   //     `<blockquote>🎮 <b>Game Ended</b></blockquote>
@@ -54,10 +54,8 @@ composer.command("end", async (ctx) => {
   if (!guard.ok) return ctx.reply(guard.message);
 
   const currentGame = await db
-    .selectFrom("games")
-    .selectAll()
-    .where("activeChat", "=", String(ctx.chat.id))
-    .executeTakeFirst();
+    .collection("games")
+    .findOne({ activeChat: String(ctx.chat.id) });
 
   if (!currentGame) return ctx.reply("There is no game in progress.");
 
@@ -100,7 +98,7 @@ composer.command("end", async (ctx) => {
   }
 
   const voteKey = `vote:${chatId}`;
-  const existingVotes = await redis.get(voteKey);
+  const existingVotes = await cache.get(voteKey);
 
   if (existingVotes) {
     return await ctx.reply(
@@ -113,7 +111,7 @@ composer.command("end", async (ctx) => {
     initiatedAt: Date.now(),
   };
 
-  await redis.setex(voteKey, 300, JSON.stringify(voteData)); // 5 minutes expiry
+  await cache.setex(voteKey, 300, JSON.stringify(voteData)); // 5 minutes expiry
 
   const userName =
     ctx.from.first_name + (ctx.from.last_name ? " " + ctx.from.last_name : "");

@@ -32,12 +32,10 @@ composer.command("allowonlylen", async (ctx) => {
   }
 
   try {
-    const existing = await db
-      .selectFrom("chatGameTopics")
-      .selectAll()
-      .where("chatId", "=", ctx.chat.id.toString())
-      .where("topicId", "=", topicId)
-      .executeTakeFirst();
+    const existing = await db.collection("chatGameTopics").findOne({
+      chatId: ctx.chat.id.toString(),
+      topicId,
+    });
 
     if (!existing) {
       return ctx.reply(
@@ -45,12 +43,10 @@ composer.command("allowonlylen", async (ctx) => {
       );
     }
 
-    await db
-      .updateTable("chatGameTopics")
-      .set({ allowedLengths: lengths })
-      .where("chatId", "=", ctx.chat.id.toString())
-      .where("topicId", "=", topicId)
-      .execute();
+    await db.collection("chatGameTopics").updateOne(
+      { chatId: ctx.chat.id.toString(), topicId },
+      { $set: { allowedLengths: lengths, updatedAt: new Date() } },
+    );
 
     return ctx.reply(
       `Allowed word lengths updated.\nDefault length: ${lengths[0]}\nAllowed: ${lengths.join(", ")}`,

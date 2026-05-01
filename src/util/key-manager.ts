@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 import { env } from "../config/env";
-import { redis } from "../config/redis";
+import { cache } from "../config/cache";
 
 const FAILED_KEYS_KEY = `seek-gemini:failed_keys`;
 const RETRY_AFTER_MINUTES = 30;
@@ -11,7 +11,7 @@ export class APIKeyManager {
   private failedKeys = new Set<string>();
 
   async initialize() {
-    const failedKeysData = await redis.get(FAILED_KEYS_KEY);
+    const failedKeysData = await cache.get(FAILED_KEYS_KEY);
     if (failedKeysData) {
       const parsed = JSON.parse(failedKeysData);
       const now = Date.now();
@@ -51,11 +51,11 @@ export class APIKeyManager {
   async markKeyAsFailed(key: string) {
     this.failedKeys.add(key);
 
-    const failedKeysData = await redis.get(FAILED_KEYS_KEY);
+    const failedKeysData = await cache.get(FAILED_KEYS_KEY);
     const parsed = failedKeysData ? JSON.parse(failedKeysData) : {};
     parsed[key] = Date.now();
 
-    await redis.setex(
+    await cache.setex(
       FAILED_KEYS_KEY,
       RETRY_AFTER_MINUTES * 60,
       JSON.stringify(parsed),
@@ -64,7 +64,7 @@ export class APIKeyManager {
 
   async resetFailedKeys() {
     this.failedKeys.clear();
-    await redis.del(FAILED_KEYS_KEY);
+    await cache.del(FAILED_KEYS_KEY);
   }
 
   getAvailableKeysCount(): number {

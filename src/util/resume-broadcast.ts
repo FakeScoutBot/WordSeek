@@ -11,10 +11,10 @@ export async function resumeBroadcast() {
   );
 
   const chats = await db
-    .selectFrom("broadcastChats")
-    .selectAll()
-    .orderBy("broadcastChats.createdAt", "asc")
-    .execute();
+    .collection("broadcastChats")
+    .find()
+    .sort({ createdAt: 1 })
+    .toArray();
 
   try {
     await bot.api.editMessageText(

@@ -23,15 +23,11 @@ composer.command("transfer", async (ctx) => {
 
   const getUser = async (identifier: string) => {
     const isUsername = identifier.startsWith("@");
-    return await db
-      .selectFrom("users")
-      .selectAll()
-      .where(
-        isUsername ? "username" : "id",
-        "=",
-        isUsername ? identifier.substring(1) : identifier,
-      )
-      .executeTakeFirst();
+    return await db.collection("users").findOne({
+      [isUsername ? "username" : "id"]: isUsername
+        ? identifier.substring(1)
+        : identifier,
+    });
   };
 
   const fromUser = await getUser(fromIdentifier);
@@ -51,10 +47,9 @@ composer.command("transfer", async (ctx) => {
 
   try {
     const leaderboardEntries = await db
-      .selectFrom("leaderboard")
-      .selectAll()
-      .where("userId", "=", fromUser.id)
-      .execute();
+      .collection("leaderboard")
+      .find({ userId: fromUser.id })
+      .toArray();
 
     if (leaderboardEntries.length === 0) {
       return ctx.reply(
@@ -63,10 +58,11 @@ composer.command("transfer", async (ctx) => {
     }
 
     await db
-      .updateTable("leaderboard")
-      .set({ userId: toUser.id })
-      .where("userId", "=", fromUser.id)
-      .execute();
+      .collection("leaderboard")
+      .updateMany(
+        { userId: fromUser.id },
+        { $set: { userId: toUser.id, updatedAt: new Date() } },
+      );
 
     const totalScore = leaderboardEntries.reduce(
       (sum, entry) => sum + entry.score,

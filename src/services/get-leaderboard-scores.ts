@@ -1,8 +1,7 @@
-import { sql } from "kysely";
-
 import { db } from "../config/db";
 import { AllowedWordLength } from "../config/constants";
 import { AllowedChatSearchKey, AllowedChatTimeKey } from "../types";
+import { getTimeRange } from "../util/time-range";
 
 export async function getLeaderboardScores({
   chatId,
@@ -15,71 +14,48 @@ export async function getLeaderboardScores({
   timeKey: AllowedChatTimeKey;
   wordLength?: AllowedWordLength;
 }) {
-  let leaderboardQuery = db
-    .selectFrom("leaderboard")
-    .innerJoin("users", "users.id", "leaderboard.userId")
-    .select((eb) => [
-      "users.id as userId",
-      "users.name as name",
-      "users.username as username",
-      sql<number>`cast(sum(${eb.ref("leaderboard.score")}) as integer)`.as(
-        "totalScore",
-      ),
-    ])
-    .where((eb) =>
-      eb.not(
-        eb.exists(
-          eb
-            .selectFrom("bannedUsers")
-            .select("userId")
-            .whereRef("bannedUsers.userId", "=", "leaderboard.userId"),
-        ),
-      ),
-    )
-    .groupBy("users.id")
-    .orderBy(sql`sum(${sql.ref("leaderboard.score")}) desc`)
-    .where(
-      "leaderboard.wordLength",
-      "=",
-      wordLength.toString() as "4" | "5" | "6",
-    )
-    .limit(20);
+  const bannedUserIds = await db.collection("bannedUsers").distinct("userId");
+  const match: Record<string, unknown> = {
+    wordLength: wordLength.toString(),
+  };
 
-  if (searchKey === "group")
-    leaderboardQuery = leaderboardQuery.where(
-      "leaderboard.chatId",
-      "=",
-      chatId,
-    );
-
-  if (timeKey !== "all") {
-    leaderboardQuery = leaderboardQuery.where((eb) => {
-      if (timeKey === "today")
-        return eb(
-          sql`date_trunc('day', ${eb.ref("leaderboard.createdAt")})`,
-          "=",
-          sql<Date>`date_trunc('day', now())`,
-        );
-      else if (timeKey === "week")
-        return eb(
-          sql`date_trunc('week', ${eb.ref("leaderboard.createdAt")})`,
-          "=",
-          sql<Date>`date_trunc('week', now())`,
-        );
-      else if (timeKey === "month")
-        return eb(
-          sql`date_trunc('month', ${eb.ref("leaderboard.createdAt")})`,
-          "=",
-          sql<Date>`date_trunc('month', now())`,
-        );
-      else
-        return eb(
-          sql`date_trunc('year', ${eb.ref("leaderboard.createdAt")})`,
-          "=",
-          sql<Date>`date_trunc('year', now())`,
-        );
-    });
+  if (searchKey === "group") {
+    match.chatId = chatId;
   }
 
-  return await leaderboardQuery.execute();
+  if (bannedUserIds.length > 0) {
+    match.userId = { $nin: bannedUserIds };
+  }
+
+  const range = getTimeRange(timeKey);
+  if (range) {
+    match.createdAt = { $gte: range.start, $lt: range.end };
+  }
+
+  const leaderboardEntries = await db
+    .collection("leaderboard")
+    .aggregate([
+      { $match: match },
+      { $group: { _id: "$userId", totalScore: { $sum: "$score" } } },
+      { $sort: { totalScore: -1 } },
+      { $limit: 20 },
+    ])
+    .toArray();
+
+  const userIds = leaderboardEntries.map((entry) => entry._id);
+  const users = await db
+    .collection("users")
+    .find({ id: { $in: userIds } })
+    .toArray();
+  const userMap = new Map(users.map((user) => [user.id, user]));
+
+  return leaderboardEntries.map((entry) => {
+    const user = userMap.get(entry._id);
+    return {
+      userId: entry._id,
+      name: user?.name ?? "Unknown",
+      username: user?.username ?? null,
+      totalScore: Number(entry.totalScore ?? 0),
+    };
+  });
 }

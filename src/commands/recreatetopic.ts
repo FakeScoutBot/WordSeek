@@ -36,14 +36,17 @@ composer.command("recreatetopic", async (ctx) => {
   const shouldRecreate = action === "on";
 
   try {
-    const result = await db
-      .updateTable("chatGameTopics")
-      .set({ shouldRecreateOnExpire: shouldRecreate })
-      .where("chatId", "=", ctx.chat.id.toString())
-      .where("topicId", "=", topicId)
-      .executeTakeFirst();
+    const result = await db.collection("chatGameTopics").updateOne(
+      { chatId: ctx.chat.id.toString(), topicId },
+      {
+        $set: {
+          shouldRecreateOnExpire: shouldRecreate,
+          updatedAt: new Date(),
+        },
+      },
+    );
 
-    if (result.numUpdatedRows === 0n) {
+    if (!result.matchedCount) {
       return ctx.reply(
         "No game topic set for this topic.\nUse /setgametopic first.",
       );

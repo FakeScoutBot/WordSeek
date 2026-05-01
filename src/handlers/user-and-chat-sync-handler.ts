@@ -25,20 +25,23 @@ composer.use(async (ctx, next) => {
           //     .where("id", "!=", userId)
           //     .execute();
           // }
-          await db
-            .insertInto("users")
-            .values({
-              id: userId,
-              name: userName,
-              username: userUsername,
-            })
-            .onConflict((oc) =>
-              oc.column("id").doUpdateSet({
+          const now = new Date();
+          await db.collection("users").updateOne(
+            { id: userId },
+            {
+              $set: {
                 name: userName,
                 username: userUsername,
-              }),
-            )
-            .execute();
+                updatedAt: now,
+              },
+              $setOnInsert: {
+                _id: userId,
+                id: userId,
+                createdAt: now,
+              },
+            },
+            { upsert: true },
+          );
         } catch (error) {
           console.error("Error in user sync:", error);
         }
@@ -65,20 +68,23 @@ composer.use(async (ctx, next) => {
           //     .where("id", "!=", chatId)
           //     .execute();
           // }
-          await db
-            .insertInto("broadcastChats")
-            .values({
-              id: chatId,
-              name: chatName,
-              username: chatUsername,
-            })
-            .onConflict((oc) =>
-              oc.column("id").doUpdateSet({
+          const now = new Date();
+          await db.collection("broadcastChats").updateOne(
+            { id: chatId },
+            {
+              $set: {
                 name: chatName,
                 username: chatUsername,
-              }),
-            )
-            .execute();
+                updatedAt: now,
+              },
+              $setOnInsert: {
+                _id: chatId,
+                id: chatId,
+                createdAt: now,
+              },
+            },
+            { upsert: true },
+          );
         } catch (error) {
           console.error("Error in chat sync:", error);
         }

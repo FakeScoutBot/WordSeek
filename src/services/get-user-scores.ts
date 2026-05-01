@@ -1,8 +1,7 @@
-import { sql } from "kysely";
-
 import { db } from "../config/db";
 import { AllowedWordLength } from "../config/constants";
 import type { AllowedChatSearchKey, AllowedChatTimeKey } from "../types";
+import { getTimeRange } from "../util/time-range";
 
 export async function getUserScores({
   chatId,
@@ -17,81 +16,50 @@ export async function getUserScores({
   timeKey: AllowedChatTimeKey;
   wordLength?: AllowedWordLength;
 }) {
-  const userQuery = db
-    .selectFrom((eb) => {
-      let innerQuery = eb
-        .selectFrom("leaderboard")
-        .where((eb) =>
-          eb.not(
-            eb.exists(
-              eb
-                .selectFrom("bannedUsers")
-                .select("userId")
-                .whereRef("bannedUsers.userId", "=", "leaderboard.userId"),
-            ),
-          ),
-        )
-        .select("leaderboard.userId")
-        .select(sql<number>`sum(leaderboard.score)`.as("totalScore"))
-        .groupBy("leaderboard.userId")
-        .select(
-          sql<number>`rank() over (order by sum(leaderboard.score) desc)`.as(
-            "rank",
-          ),
-        )
-        .where(
-          "leaderboard.wordLength",
-          "=",
-          wordLength.toString() as "4" | "5" | "6",
-        );
+  const bannedUserIds = await db.collection("bannedUsers").distinct("userId");
+  if (bannedUserIds.includes(userId)) return null;
 
-      if (searchKey === "group") {
-        innerQuery = innerQuery.where("leaderboard.chatId", "=", chatId);
-      }
+  const match: Record<string, unknown> = {
+    wordLength: wordLength.toString(),
+  };
 
-      if (timeKey !== "all") {
-        innerQuery = innerQuery.where((eb) => {
-          if (timeKey === "today")
-            return eb(
-              sql`date_trunc('day', ${eb.ref("leaderboard.createdAt")})`,
-              "=",
-              sql<Date>`date_trunc('day', now())`,
-            );
-          else if (timeKey === "week")
-            return eb(
-              sql`date_trunc('week', ${eb.ref("leaderboard.createdAt")})`,
-              "=",
-              sql<Date>`date_trunc('week', now())`,
-            );
-          else if (timeKey === "month")
-            return eb(
-              sql`date_trunc('month', ${eb.ref("leaderboard.createdAt")})`,
-              "=",
-              sql<Date>`date_trunc('month', now())`,
-            );
-          else
-            return eb(
-              sql`date_trunc('year', ${eb.ref("leaderboard.createdAt")})`,
-              "=",
-              sql<Date>`date_trunc('year', now())`,
-            );
-        });
-      }
+  if (searchKey === "group") {
+    match.chatId = chatId;
+  }
 
-      return innerQuery.as("lb");
-    })
-    .innerJoin("users", "users.id", "lb.userId")
-    .leftJoin("userStats", "userStats.userId", "users.id")
-    .select([
-      "users.id",
-      "users.name",
-      "users.username",
-      "lb.totalScore",
-      "lb.rank",
-      "userStats.highestStreak",
-      "userStats.currentStreak",
+  if (bannedUserIds.length > 0) {
+    match.userId = { $nin: bannedUserIds };
+  }
+
+  const range = getTimeRange(timeKey);
+  if (range) {
+    match.createdAt = { $gte: range.start, $lt: range.end };
+  }
+
+  const leaderboardEntries = await db
+    .collection("leaderboard")
+    .aggregate([
+      { $match: match },
+      { $group: { _id: "$userId", totalScore: { $sum: "$score" } } },
+      { $sort: { totalScore: -1 } },
     ])
-    .where("users.id", "=", userId);
+    .toArray();
 
-  return await userQuery.executeTakeFirst();
+  const rankIndex = leaderboardEntries.findIndex((entry) => entry._id === userId);
+  if (rankIndex === -1) return null;
+
+  const user = await db.collection("users").findOne({ id: userId });
+  if (!user) return null;
+
+  const userStats = await db.collection("userStats").findOne({ userId });
+
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username ?? null,
+    totalScore: Number(leaderboardEntries[rankIndex]?.totalScore ?? 0),
+    rank: rankIndex + 1,
+    highestStreak: userStats?.highestStreak ?? 0,
+    currentStreak: userStats?.currentStreak ?? 0,
+  };
 }

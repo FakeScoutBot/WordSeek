@@ -1,35 +1,41 @@
-import {
-  CamelCasePlugin,
-  DeduplicateJoinsPlugin,
-  Kysely,
-  PostgresDialect,
-} from "kysely";
-import pg from "pg";
+import { MongoClient, ObjectId } from "mongodb";
 
-import type { DB } from "../database-schemas";
 import { env } from "./env";
 
-const { Pool } = pg;
+export const mongoClient = new MongoClient(env.MONGODB_URI);
 
-const dialect = new PostgresDialect({
-  pool: new Pool({
-    connectionString: env.DATABASE_URL,
-    max: 10,
-  }),
-});
+await mongoClient.connect();
 
-export const db = new Kysely<DB>({
-  dialect,
-  log: (event) => {
-    if (env.NODE_ENV === "development") {
-      if (event.level === "query") {
-        console.log("SQL:", event.query.sql);
-        console.log("Parameters:", event.query.parameters);
-      } else {
-        console.error("Error:", event.error);
-      }
-      console.log("-------------");
-    }
-  },
-  plugins: [new CamelCasePlugin(), new DeduplicateJoinsPlugin()],
-});
+export const db = mongoClient.db(env.MONGODB_DB);
+
+export const createId = () => new ObjectId().toHexString();
+
+async function ensureIndexes() {
+  await Promise.all([
+    db.collection("users").createIndex({ id: 1 }, { unique: true }),
+    db.collection("broadcastChats").createIndex({ id: 1 }, { unique: true }),
+    db.collection("bannedUsers").createIndex({ userId: 1 }, { unique: true }),
+    db
+      .collection("authorizedUsers")
+      .createIndex({ chatId: 1, userId: 1 }, { unique: true }),
+    db
+      .collection("chatGameTopics")
+      .createIndex({ chatId: 1, topicId: 1 }, { unique: true }),
+    db
+      .collection("games")
+      .createIndex({ activeChat: 1, topicId: 1 }, { unique: true }),
+    db.collection("dailyWords").createIndex({ date: 1 }, { unique: true }),
+    db.collection("dailyWords").createIndex({ dayNumber: 1 }, { unique: true }),
+    db
+      .collection("dailyGuesses")
+      .createIndex({ userId: 1, dailyWordId: 1 }),
+    db.collection("userStats").createIndex({ userId: 1 }, { unique: true }),
+    db.collection("jobs").createIndex({ type: 1, status: 1, runAt: 1 }),
+    db.collection("cache").createIndex(
+      { expiresAt: 1 },
+      { expireAfterSeconds: 0 },
+    ),
+  ]);
+}
+
+await ensureIndexes();

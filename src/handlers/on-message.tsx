@@ -8,8 +8,8 @@ import { join } from "path";
 import satori from "satori";
 import { readFile } from "fs/promises";
 
-import { db } from "../config/db";
-import { redis } from "../config/redis";
+import { cache } from "../config/cache";
+import { createId, db } from "../config/db";
 import allSixWords from "../data/all-six.json";
 import allFiveWords from "../data/all-five.json";
 import allFourWords from "../data/all-four.json";
@@ -35,7 +35,7 @@ const MODE_LABEL: Record<WordLength, string> = {
 };
 
 export const dailyWordleSchema = z.object({
-  dailyWordId: z.number(),
+  dailyWordId: z.string(),
   date: z.string(),
 });
 
@@ -52,7 +52,7 @@ composer.on("message:text", async (ctx) => {
   const chatId = ctx.chat.id.toString();
 
   if (ctx.chat.type === "private") {
-    const dailyGameData = await redis.get(`daily_wordle:${userId}`);
+    const dailyGameData = await cache.get(`daily_wordle:${userId}`);
     const result = dailyWordleSchema.safeParse(
       JSON.parse(dailyGameData || "{}"),
     );
@@ -60,7 +60,7 @@ composer.on("message:text", async (ctx) => {
       const todayDate = getCurrentGameDateString();
 
       if (result.data.date !== todayDate) {
-        await redis.del(`daily_wordle:${userId}`);
+        await cache.del(`daily_wordle:${userId}`);
         return ctx.reply(
           "Your previous game has expired. Please start today's WordSeek with /daily",
         );
@@ -72,12 +72,10 @@ composer.on("message:text", async (ctx) => {
 
   const currentTopicId = ctx.msg.message_thread_id?.toString() || "general";
 
-  const currentGame = await db
-    .selectFrom("games")
-    .selectAll()
-    .where("activeChat", "=", ctx.chat.id.toString())
-    .where("topicId", "=", currentTopicId)
-    .executeTakeFirst();
+  const currentGame = await db.collection("games").findOne({
+    activeChat: ctx.chat.id.toString(),
+    topicId: currentTopicId,
+  });
 
   if (!currentGame) return;
 
@@ -94,12 +92,10 @@ composer.on("message:text", async (ctx) => {
       `${currentGuess} is not a valid ${wordLength}-letter word.`,
     );
 
-  const guessExists = await db
-    .selectFrom("guesses")
-    .selectAll()
-    .where("guess", "=", currentGuess)
-    .where("chatId", "=", ctx.chat.id.toString())
-    .executeTakeFirst();
+  const guessExists = await db.collection("guesses").findOne({
+    guess: currentGuess,
+    chatId: ctx.chat.id.toString(),
+  });
 
   if (guessExists)
     return ctx.reply(
@@ -109,23 +105,25 @@ composer.on("message:text", async (ctx) => {
   if (currentGuess === currentGame.word) {
     if (!ctx.from.is_bot) {
       const allGuesses = await db
-        .selectFrom("guesses")
-        .selectAll()
-        .where("gameId", "=", currentGame.id)
-        .execute();
+        .collection("guesses")
+        .find({ gameId: currentGame.id })
+        .toArray();
 
       const score = 30 - allGuesses.length;
       const additionalMessage = `Added ${30 - allGuesses.length} to the leaderboard.`;
 
-      await db
-        .insertInto("leaderboard")
-        .values({
-          score,
-          chatId,
-          userId,
-          wordLength: wordLength.toString() as "4" | "5" | "6",
-        })
-        .execute();
+      const now = new Date();
+      const leaderboardId = createId();
+      await db.collection("leaderboard").insertOne({
+        _id: leaderboardId,
+        id: leaderboardId,
+        score,
+        chatId,
+        userId,
+        wordLength: wordLength.toString(),
+        createdAt: now,
+        updatedAt: now,
+      });
 
       const formattedResponse = `<blockquote>Congrats! You guessed it correctly.\nCorrect Word: <b>${currentGuess}</b>\n${additionalMessage}</blockquote>\nStart with /new${wordLength}`;
 
@@ -145,28 +143,31 @@ composer.on("message:text", async (ctx) => {
     }
 
     reactWithRandom(ctx);
-    await db.deleteFrom("games").where("id", "=", currentGame.id).execute();
+    await db.collection("games").deleteOne({ id: currentGame.id });
+    await db.collection("guesses").deleteMany({ gameId: currentGame.id });
     return;
   }
 
-  await db
-    .insertInto("guesses")
-    .values({
-      gameId: currentGame.id,
-      guess: currentGuess,
-      chatId,
-    })
-    .execute();
+  const guessId = createId();
+  await db.collection("guesses").insertOne({
+    _id: guessId,
+    id: guessId,
+    gameId: currentGame.id,
+    guess: currentGuess,
+    chatId,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
 
   const allGuesses = await db
-    .selectFrom("guesses")
-    .selectAll()
-    .where("gameId", "=", currentGame.id)
-    .orderBy("createdAt", "asc")
-    .execute();
+    .collection("guesses")
+    .find({ gameId: currentGame.id })
+    .sort({ createdAt: 1 })
+    .toArray();
 
   if (allGuesses.length === 30) {
-    await db.deleteFrom("games").where("id", "=", currentGame.id).execute();
+    await db.collection("games").deleteOne({ id: currentGame.id });
+    await db.collection("guesses").deleteMany({ gameId: currentGame.id });
     return ctx.reply(
       "Game Over! The word was " +
         currentGame.word +
@@ -194,10 +195,8 @@ async function handleDailyWordleGuess(ctx: Context, currentGuess: string) {
   const todayDate = getCurrentGameDateString();
 
   const dailyWord = await db
-    .selectFrom("dailyWords")
-    .selectAll()
-    .where("date", "=", new Date(todayDate))
-    .executeTakeFirst();
+    .collection("dailyWords")
+    .findOne({ date: todayDate });
 
   if (!dailyWord) {
     return ctx.reply(
@@ -206,35 +205,33 @@ async function handleDailyWordleGuess(ctx: Context, currentGuess: string) {
   }
 
   const existingGuesses = await db
-    .selectFrom("dailyGuesses")
-    .selectAll()
-    .where("userId", "=", userId)
-    .where("dailyWordId", "=", dailyWord.id)
-    .orderBy("attemptNumber", "asc")
-    .execute();
+    .collection("dailyGuesses")
+    .find({ userId, dailyWordId: dailyWord.id })
+    .sort({ attemptNumber: 1 })
+    .toArray();
 
   if (existingGuesses.some((g) => g.guess === currentGuess)) {
     return ctx.reply("You've already guessed this word. Try a different one!");
   }
 
   const attemptNumber = existingGuesses.length + 1;
-  await db
-    .insertInto("dailyGuesses")
-    .values({
-      userId,
-      dailyWordId: dailyWord.id,
-      guess: currentGuess,
-      attemptNumber,
-    })
-    .execute();
+  const dailyGuessId = createId();
+  await db.collection("dailyGuesses").insertOne({
+    _id: dailyGuessId,
+    id: dailyGuessId,
+    userId,
+    dailyWordId: dailyWord.id,
+    guess: currentGuess,
+    attemptNumber,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
 
   const allGuesses = await db
-    .selectFrom("dailyGuesses")
-    .selectAll()
-    .where("userId", "=", userId)
-    .where("dailyWordId", "=", dailyWord.id)
-    .orderBy("attemptNumber", "asc")
-    .execute();
+    .collection("dailyGuesses")
+    .find({ userId, dailyWordId: dailyWord.id })
+    .sort({ attemptNumber: 1 })
+    .toArray();
 
   if (currentGuess === dailyWord.word) {
     await handleDailyWordleWin(ctx, dailyWord, allGuesses);
@@ -255,7 +252,7 @@ async function handleDailyWordleGuess(ctx: Context, currentGuess: string) {
 }
 
 type DailyWord = {
-  date: Date;
+  date: string;
   dayNumber: number;
   meaning: string | null;
   phonetic: string | null;
@@ -269,13 +266,11 @@ async function handleDailyWordleWin(
 ) {
   const userId = ctx.from!.id.toString();
 
-  await redis.del(`daily_wordle:${userId}`);
+  await cache.del(`daily_wordle:${userId}`);
 
   const userStats = await db
-    .selectFrom("userStats")
-    .selectAll()
-    .where("userId", "=", userId)
-    .executeTakeFirst();
+    .collection("userStats")
+    .findOne({ userId });
 
   if (userStats) {
     const todayDateString = getCurrentGameDateString();
@@ -299,15 +294,18 @@ async function handleDailyWordleWin(
 
     const newHighestStreak = Math.max(newStreak, userStats.highestStreak);
 
-    await db
-      .updateTable("userStats")
-      .set({
-        currentStreak: newStreak,
-        highestStreak: newHighestStreak,
-        lastGuessed: new Date().toISOString(),
-      })
-      .where("userId", "=", userId)
-      .execute();
+    await db.collection("userStats").updateOne(
+      { userId },
+      {
+        $set: {
+          currentStreak: newStreak,
+          highestStreak: newHighestStreak,
+          lastGuessed: new Date(),
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true },
+    );
 
     const imageBuffer = await generateWordleImage(allGuesses, dailyWord.word);
     const shareText = generateWordleShareText(
@@ -384,16 +382,19 @@ async function handleDailyWordleLoss(
 ) {
   const userId = ctx.from!.id.toString();
 
-  await redis.del(`daily_wordle:${userId}`);
+  await cache.del(`daily_wordle:${userId}`);
 
-  await db
-    .updateTable("userStats")
-    .set({
-      currentStreak: 0,
-      lastGuessed: new Date().toISOString(),
-    })
-    .where("userId", "=", userId)
-    .execute();
+  await db.collection("userStats").updateOne(
+    { userId },
+    {
+      $set: {
+        currentStreak: 0,
+        lastGuessed: new Date(),
+        updatedAt: new Date(),
+      },
+    },
+    { upsert: true },
+  );
 
   const imageBuffer = await generateWordleImage(allGuesses, dailyWord.word);
   const shareText = generateWordleShareText(
@@ -421,10 +422,10 @@ async function handleDailyWordleLoss(
 export const onMessageHander = composer;
 
 interface GuessEntry {
-  id: number;
+  id: string;
   guess: string;
-  gameId?: number;
-  dailyWordId?: number;
+  gameId?: string;
+  dailyWordId?: string;
   attemptNumber?: number;
   createdAt: Date;
   updatedAt: Date;
