@@ -35,7 +35,9 @@ const MODE_LABEL: Record<WordLength, string> = {
 };
 
 export const dailyWordleSchema = z.object({
-  dailyWordId: z.string(),
+  dailyWordId: z
+    .union([z.string(), z.number()])
+    .transform((value) => value.toString()),
   date: z.string(),
 });
 
@@ -462,8 +464,14 @@ function getFeedback(data: GuessEntry[], solution: string) {
 }
 
 async function cleanupGame(gameId: string) {
-  await db.collection("games").deleteOne({ id: gameId });
-  await db.collection("guesses").deleteMany({ gameId });
+  try {
+    await Promise.all([
+      db.collection("games").deleteOne({ id: gameId }),
+      db.collection("guesses").deleteMany({ gameId }),
+    ]);
+  } catch (error) {
+    console.error("Failed to cleanup game data:", error);
+  }
 }
 
 export async function generateWordleImage(

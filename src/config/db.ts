@@ -4,7 +4,23 @@ import { env } from "./env";
 
 export const mongoClient = new MongoClient(env.MONGODB_URI);
 
-await mongoClient.connect();
+const connectWithRetry = async (attempts = 5, delayMs = 2000) => {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await mongoClient.connect();
+      return;
+    } catch (error) {
+      if (attempt === attempts) throw error;
+      console.error(
+        `MongoDB connection failed (attempt ${attempt}/${attempts}). Retrying...`,
+        error,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+};
+
+await connectWithRetry();
 
 export const db = mongoClient.db(env.MONGODB_DB);
 

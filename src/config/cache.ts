@@ -116,7 +116,7 @@ export const cache = {
     let keepTtl = false;
     let nx = false;
 
-    for (let i = 0; i < args.length; i += 1) {
+    for (let i = 0; i < args.length; i++) {
       const arg = args[i];
       if (arg === "EX") {
         const seconds = Number(args[i + 1]);

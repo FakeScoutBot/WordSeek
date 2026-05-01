@@ -13,7 +13,7 @@ import { onBotAddedInChat } from "./handlers/on-bot-added-in-chat";
 import { topicEditedHandler } from "./handlers/topic-edited-handler";
 import { trackMessagesHandler } from "./handlers/track-messages-handler";
 import { userAndChatSyncHandler } from "./handlers/user-and-chat-sync-handler";
-import "./queues/captcha-queue";
+import { startCaptchaJobPolling } from "./queues/captcha-queue";
 import {
   dailyWordleCron,
   ensureDailyWordExists,
@@ -43,6 +43,7 @@ bot.use(onBotAddedInChat);
 bot.catch(errorHandler);
 dailyWordleCron.start();
 await ensureDailyWordExists();
+startCaptchaJobPolling();
 
 await bot.api.deleteWebhook({ drop_pending_updates: true });
 

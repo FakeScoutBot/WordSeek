@@ -245,7 +245,7 @@ function deterministicShuffle(seed: number) {
 }
 
 function getWordOfTheDay(shuffled: string[], dayNumber: number) {
-  return shuffled[((dayNumber % shuffled.length) + shuffled.length) % shuffled.length];
+  return shuffled[dayNumber % shuffled.length];
 }
 
 function getDayNumberForDate(dateString: string) {
@@ -254,6 +254,10 @@ function getDayNumberForDate(dateString: string) {
   const dayNumber = Math.floor(
     (targetDate.getTime() - env.DAILY_WORDLE_START_DATE.getTime()) / msPerDay,
   );
+
+  if (dayNumber < 0) {
+    throw new Error("DAILY_WORDLE_START_DATE is after the requested game date.");
+  }
 
   return dayNumber;
 }

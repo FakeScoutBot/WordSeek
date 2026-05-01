@@ -74,8 +74,11 @@ async function processCaptchaJobs() {
 }
 
 let pollDelay = MIN_POLL_INTERVAL_MS;
+let pollTimeout: ReturnType<typeof setTimeout> | null = null;
+let polling = false;
 
 const pollCaptchaJobs = async () => {
+  if (!polling) return;
   try {
     const processed = await processCaptchaJobs();
     pollDelay = processed
@@ -85,12 +88,23 @@ const pollCaptchaJobs = async () => {
     console.error("Captcha job poll failed:", error);
     pollDelay = Math.min(pollDelay * 2, MAX_POLL_INTERVAL_MS);
   }
-  setTimeout(() => {
+  pollTimeout = setTimeout(() => {
     void pollCaptchaJobs();
   }, pollDelay);
 };
 
-void pollCaptchaJobs();
+export const startCaptchaJobPolling = () => {
+  if (polling) return () => {};
+  polling = true;
+  void pollCaptchaJobs();
+  return () => {
+    polling = false;
+    if (pollTimeout) {
+      clearTimeout(pollTimeout);
+      pollTimeout = null;
+    }
+  };
+};
 
 export async function scheduleCaptchaExpiry({
   chatId,
