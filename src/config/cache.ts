@@ -22,7 +22,7 @@ const getExisting = async (key: string) => {
   return entry;
 };
 
-const escapeRegexChar = (value: string) =>
+const escapeRegExp = (value: string) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const normalizeKeyPattern = (pattern: string) => {
@@ -31,7 +31,7 @@ const normalizeKeyPattern = (pattern: string) => {
 
   for (const char of pattern) {
     if (escaping) {
-      regex += escapeRegexChar(char);
+      regex += escapeRegExp(char);
       escaping = false;
       continue;
     }
@@ -51,7 +51,7 @@ const normalizeKeyPattern = (pattern: string) => {
       continue;
     }
 
-    regex += escapeRegexChar(char);
+    regex += escapeRegExp(char);
   }
 
   if (escaping) {
@@ -128,6 +128,8 @@ export const cache = {
         nx = true;
       } else if (arg === "KEEPTTL") {
         keepTtl = true;
+      } else if (typeof arg === "string") {
+        console.warn(`Unknown cache option: ${arg}`);
       }
     }
 

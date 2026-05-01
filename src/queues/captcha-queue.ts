@@ -76,10 +76,15 @@ async function processCaptchaJobs() {
 let pollDelay = MIN_POLL_INTERVAL_MS;
 
 const pollCaptchaJobs = async () => {
-  const processed = await processCaptchaJobs();
-  pollDelay = processed
-    ? MIN_POLL_INTERVAL_MS
-    : Math.min(pollDelay * 2, MAX_POLL_INTERVAL_MS);
+  try {
+    const processed = await processCaptchaJobs();
+    pollDelay = processed
+      ? MIN_POLL_INTERVAL_MS
+      : Math.min(pollDelay * 2, MAX_POLL_INTERVAL_MS);
+  } catch (error) {
+    console.error("Captcha job poll failed:", error);
+    pollDelay = Math.min(pollDelay * 2, MAX_POLL_INTERVAL_MS);
+  }
   setTimeout(() => {
     void pollCaptchaJobs();
   }, pollDelay);

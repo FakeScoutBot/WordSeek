@@ -245,7 +245,7 @@ function deterministicShuffle(seed: number) {
 }
 
 function getWordOfTheDay(shuffled: string[], dayNumber: number) {
-  return shuffled[dayNumber % shuffled.length];
+  return shuffled[((dayNumber % shuffled.length) + shuffled.length) % shuffled.length];
 }
 
 function getDayNumberForDate(dateString: string) {
@@ -255,7 +255,7 @@ function getDayNumberForDate(dateString: string) {
     (targetDate.getTime() - env.DAILY_WORDLE_START_DATE.getTime()) / msPerDay,
   );
 
-  return Math.max(0, dayNumber);
+  return dayNumber;
 }
 
 export const dailyWordleCron = new CronJob(
