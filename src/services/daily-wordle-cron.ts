@@ -160,6 +160,12 @@ async function generateDailyWordInternal(gameDate: string) {
   const seed = seedFromSecret(env.DAILY_WORDLE_SECRET);
   const shuffled = deterministicShuffle(seed);
   const dayNumber = getDayNumberForDate(gameDate);
+  if (dayNumber < 0) {
+    console.error(
+      "DAILY_WORDLE_START_DATE is after the requested game date. Skipping generation.",
+    );
+    return null;
+  }
   const word = getWordOfTheDay(shuffled, dayNumber);
 
   const details = await getWordDetails(word);
@@ -254,10 +260,6 @@ function getDayNumberForDate(dateString: string) {
   const dayNumber = Math.floor(
     (targetDate.getTime() - env.DAILY_WORDLE_START_DATE.getTime()) / msPerDay,
   );
-
-  if (dayNumber < 0) {
-    throw new Error("DAILY_WORDLE_START_DATE is after the requested game date.");
-  }
 
   return dayNumber;
 }
