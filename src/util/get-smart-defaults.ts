@@ -21,10 +21,13 @@ export async function getSmartDefaults({
     requestedSearchKey || (chatType === "private" ? "global" : "group");
 
   if (searchKey === "group" && chatType !== "private") {
-    const groupScoresExist = await db.collection("leaderboard").findOne({
-      userId,
-      chatId,
-    });
+    const groupScoresExist = await db.collection("leaderboard").findOne(
+      {
+        userId,
+        chatId,
+      },
+      { projection: { _id: 1 } },
+    );
 
     if (!groupScoresExist) {
       searchKey = "global";
@@ -48,11 +51,14 @@ export async function getSmartDefaults({
     });
   }
 
-  const hasAnyScores = !!(await db.collection("leaderboard").findOne({
-    userId,
-    wordLength: wordLength.toString(),
-    ...(searchKey === "group" ? { chatId } : {}),
-  }));
+  const hasAnyScores = !!(await db.collection("leaderboard").findOne(
+    {
+      userId,
+      wordLength: wordLength.toString(),
+      ...(searchKey === "group" ? { chatId } : {}),
+    },
+    { projection: { _id: 1 } },
+  ));
 
   return { searchKey, timeKey, wordLength, hasAnyScores };
 }
@@ -69,11 +75,14 @@ async function getSmartDefaultWordLength({
   const preferenceOrder: AllowedWordLength[] = [5, 4, 6];
 
   for (const length of preferenceOrder) {
-    const exists = await db.collection("leaderboard").findOne({
-      userId,
-      wordLength: length.toString(),
-      ...(searchKey === "group" ? { chatId } : {}),
-    });
+    const exists = await db.collection("leaderboard").findOne(
+      {
+        userId,
+        wordLength: length.toString(),
+        ...(searchKey === "group" ? { chatId } : {}),
+      },
+      { projection: { _id: 1 } },
+    );
     if (exists) return length;
   }
 
@@ -98,6 +107,7 @@ async function getSmartDefaultTimeKey({
       wordLength: wordLength.toString(),
       ...(searchKey === "group" ? { chatId } : {}),
     })
+    .project({ createdAt: 1 })
     .sort({ createdAt: -1 })
     .limit(1)
     .next();

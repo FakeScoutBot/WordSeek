@@ -1,4 +1,5 @@
 import { CommandContext, Composer, Context } from "grammy";
+import { MongoServerError } from "mongodb";
 
 import { createId, db } from "../config/db";
 import { CommandsHelper } from "../util/commands-helper";
@@ -92,6 +93,11 @@ async function startGame(
 
     return ctx.reply(`Game started! Guess the ${wordLength}-letter word!`);
   } catch (error) {
+    if (error instanceof MongoServerError && error.code === 11000) {
+      return ctx.reply(
+        "There is already a game in progress in this chat. Use /end to end the current game.",
+      );
+    }
     console.error(error);
     return ctx.reply("Something went wrong. Please try again.");
   }

@@ -17,7 +17,8 @@ type CaptchaJob = {
   createdAt: Date;
 };
 
-const JOB_POLL_INTERVAL_MS = 5000;
+const MIN_POLL_INTERVAL_MS = 5000;
+const MAX_POLL_INTERVAL_MS = 30000;
 
 async function processCaptchaJobs() {
   const now = new Date();
@@ -27,7 +28,7 @@ async function processCaptchaJobs() {
     { sort: { runAt: 1 } },
   );
 
-  if (!job.value) return;
+  if (!job.value) return false;
 
   const { chatId, userId, messageId } = job.value.payload;
   const key = `captcha:${chatId}:${userId}`;
@@ -35,7 +36,7 @@ async function processCaptchaJobs() {
 
   if (!raw) {
     await db.collection("jobs").deleteOne({ _id: job.value._id });
-    return;
+    return true;
   }
 
   const session = captchaSchema.parse(JSON.parse(raw));
@@ -69,11 +70,22 @@ async function processCaptchaJobs() {
   }
 
   await db.collection("jobs").deleteOne({ _id: job.value._id });
+  return true;
 }
 
-setInterval(() => {
-  void processCaptchaJobs();
-}, JOB_POLL_INTERVAL_MS);
+let pollDelay = MIN_POLL_INTERVAL_MS;
+
+const pollCaptchaJobs = async () => {
+  const processed = await processCaptchaJobs();
+  pollDelay = processed
+    ? MIN_POLL_INTERVAL_MS
+    : Math.min(pollDelay * 2, MAX_POLL_INTERVAL_MS);
+  setTimeout(() => {
+    void pollCaptchaJobs();
+  }, pollDelay);
+};
+
+void pollCaptchaJobs();
 
 export async function scheduleCaptchaExpiry({
   chatId,

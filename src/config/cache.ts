@@ -22,10 +22,44 @@ const getExisting = async (key: string) => {
   return entry;
 };
 
+const escapeRegexChar = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const normalizeKeyPattern = (pattern: string) => {
-  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  const regex = escaped.replace(/\*/g, ".*").replace(/\?/g, ".");
-  return new RegExp(`^${regex}$`);
+  let regex = "^";
+  let escaping = false;
+
+  for (const char of pattern) {
+    if (escaping) {
+      regex += escapeRegexChar(char);
+      escaping = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaping = true;
+      continue;
+    }
+
+    if (char === "*") {
+      regex += ".*";
+      continue;
+    }
+
+    if (char === "?") {
+      regex += ".";
+      continue;
+    }
+
+    regex += escapeRegexChar(char);
+  }
+
+  if (escaping) {
+    regex += "\\\\";
+  }
+
+  regex += "$";
+  return new RegExp(regex);
 };
 
 class MongoPipeline {

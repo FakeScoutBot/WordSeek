@@ -143,8 +143,7 @@ composer.on("message:text", async (ctx) => {
     }
 
     reactWithRandom(ctx);
-    await db.collection("games").deleteOne({ id: currentGame.id });
-    await db.collection("guesses").deleteMany({ gameId: currentGame.id });
+    await cleanupGame(currentGame.id);
     return;
   }
 
@@ -166,8 +165,7 @@ composer.on("message:text", async (ctx) => {
     .toArray();
 
   if (allGuesses.length === 30) {
-    await db.collection("games").deleteOne({ id: currentGame.id });
-    await db.collection("guesses").deleteMany({ gameId: currentGame.id });
+    await cleanupGame(currentGame.id);
     return ctx.reply(
       "Game Over! The word was " +
         currentGame.word +
@@ -196,7 +194,7 @@ async function handleDailyWordleGuess(ctx: Context, currentGuess: string) {
 
   const dailyWord = await db
     .collection("dailyWords")
-    .findOne({ date: todayDate });
+    .findOne({ date: new Date(`${todayDate}T00:00:00`) });
 
   if (!dailyWord) {
     return ctx.reply(
@@ -252,7 +250,7 @@ async function handleDailyWordleGuess(ctx: Context, currentGuess: string) {
 }
 
 type DailyWord = {
-  date: string;
+  date: Date;
   dayNumber: number;
   meaning: string | null;
   phonetic: string | null;
@@ -461,6 +459,11 @@ function getFeedback(data: GuessEntry[], solution: string) {
       return `${feedback} ${guess}`;
     })
     .join("\n");
+}
+
+async function cleanupGame(gameId: string) {
+  await db.collection("games").deleteOne({ id: gameId });
+  await db.collection("guesses").deleteMany({ gameId });
 }
 
 export async function generateWordleImage(

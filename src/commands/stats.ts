@@ -39,7 +39,7 @@ composer.command("stats", async (ctx) => {
       db.collection("users").countDocuments(),
       db
         .collection("leaderboard")
-        .distinct("chatId", { chatId: { $not: /^-1/ } })
+        .distinct("chatId", { chatId: { $not: { $regex: /^-1/ } } })
         .then((ids) => ids.length),
       db
         .collection("leaderboard")

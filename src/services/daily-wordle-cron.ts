@@ -150,9 +150,10 @@ async function resetStreaksForInactivePlayers(yesterdayDate: string) {
 }
 
 async function generateDailyWordInternal(gameDate: string) {
+  const gameDateValue = new Date(`${gameDate}T00:00:00`);
   const existingWord = await db
     .collection("dailyWords")
-    .findOne({ date: gameDate });
+    .findOne({ date: gameDateValue });
 
   if (existingWord) return existingWord;
 
@@ -167,7 +168,7 @@ async function generateDailyWordInternal(gameDate: string) {
   const dailyWord = {
     id: createId(),
     word,
-    date: gameDate,
+    date: gameDateValue,
     dayNumber,
     meaning: details?.meaning ?? null,
     phonetic: details?.phonetic ?? null,
@@ -244,15 +245,17 @@ function deterministicShuffle(seed: number) {
 }
 
 function getWordOfTheDay(shuffled: string[], dayNumber: number) {
-  return shuffled[((dayNumber % shuffled.length) + shuffled.length) % shuffled.length];
+  return shuffled[dayNumber % shuffled.length];
 }
 
 function getDayNumberForDate(dateString: string) {
   const msPerDay = 24 * 60 * 60 * 1000;
   const targetDate = new Date(`${dateString}T00:00:00`);
-  return Math.floor(
+  const dayNumber = Math.floor(
     (targetDate.getTime() - env.DAILY_WORDLE_START_DATE.getTime()) / msPerDay,
   );
+
+  return Math.max(0, dayNumber);
 }
 
 export const dailyWordleCron = new CronJob(
